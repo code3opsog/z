@@ -78,18 +78,37 @@ async function getRobloxUserId(cookie: string): Promise<number> {
 }
 
 async function getFriendRequests(cookie: string): Promise<FriendRequest[]> {
-  const response = await fetch('https://friends.roblox.com/v1/my/friends/requests?sortOrder=Desc&limit=100', {
-    headers: {
-      'Cookie': `.ROBLOSECURITY=${cookie}`
+  let allRequests: FriendRequest[] = [];
+  let cursor = '';
+  
+  // Keep fetching until we have all requests
+  while (true) {
+    const url = cursor 
+      ? `https://friends.roblox.com/v1/my/friends/requests?sortOrder=Desc&limit=100&cursor=${cursor}`
+      : 'https://friends.roblox.com/v1/my/friends/requests?sortOrder=Desc&limit=100';
+    
+    const response = await fetch(url, {
+      headers: {
+        'Cookie': `.ROBLOSECURITY=${cookie}`
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch friend requests');
     }
-  });
 
-  if (!response.ok) {
-    throw new Error('Failed to fetch friend requests');
+    const data = await response.json();
+    allRequests = allRequests.concat(data.data || []);
+    
+    // Check if there's more data
+    if (data.nextPageCursor) {
+      cursor = data.nextPageCursor;
+    } else {
+      break; // No more pages
+    }
   }
-
-  const data = await response.json();
-  return data.data || [];
+  
+  return allRequests;
 }
 
 async function getUserProfile(userId: number, cookie: string): Promise<UserProfile> {
@@ -178,25 +197,40 @@ export async function POST(request: Request) {
     }
 
     // Get all pending friend requests
+    console.log('Fetching friend requests...');
     const friendRequests = await getFriendRequests(cookie);
+    console.log(`Total friend requests found: ${friendRequests.length}`);
     await setStat('pending_requests', friendRequests.length);
 
     let declined = 0;
+    let checked = 0;
 
     // Process each friend request
     for (const request of friendRequests) {
       try {
+        checked++;
+        
         // Get user profile
         const profile = await getUserProfile(request.userId, cookie);
         const friendsCount = await getUserFriendsCount(request.userId, cookie);
+        
+        const accountAge = Math.floor((Date.now() - new Date(profile.created).getTime()) / (1000 * 60 * 60 * 24));
+        console.log(`Checking user ${profile.name} (ID: ${request.userId}): Age ${accountAge} days`);
 
         // Check if user is a bot
         if (isBot(profile, friendsCount, filters)) {
+          console.log(`Declining ${profile.name} - Account age: ${accountAge} days`);
+          
           // Decline the friend request
           const success = await declineFriendRequest(request.userId, cookie);
           if (success) {
             declined++;
+            console.log(`Successfully declined ${profile.name}`);
+          } else {
+            console.log(`Failed to decline ${profile.name}`);
           }
+        } else {
+          console.log(`Keeping ${profile.name} - Account age: ${accountAge} days (passed checks)`);
         }
 
         // Add small delay to avoid rate limiting
@@ -205,6 +239,8 @@ export async function POST(request: Request) {
         console.error(`Error processing user ${request.userId}:`, error);
       }
     }
+
+    console.log(`Finished: Checked ${checked}, Declined ${declined}`);
 
     // Update stats
     const totalDeclined = (await getStat('total_declined', 0)) + declined;
