@@ -1,19 +1,25 @@
 import { NextResponse } from 'next/server';
-import { kv } from '@vercel/kv';
+
+// Simple in-memory storage (resets on deploy, but works for testing)
+// For production, use Vercel Postgres or Edge Config
+let storage: any = {
+  roblox_cookie: process.env.ROBLOX_COOKIE || '',
+  bot_filters: {
+    minAccountAge: 30,
+    maxFriends: 10,
+    minFriends: 0,
+    checkDescription: true,
+    suspiciousPatterns: ['discord.gg', 't.me', 'free robux', 'visit', 'click here'],
+    enabled: true
+  }
+};
 
 export async function GET() {
   try {
-    const cookie = await kv.get('roblox_cookie') || '';
-    const filters = await kv.get('bot_filters') || {
-      minAccountAge: 30,
-      maxFriends: 10,
-      minFriends: 0,
-      checkDescription: true,
-      suspiciousPatterns: ['discord.gg', 't.me', 'free robux', 'visit', 'click here'],
-      enabled: true
-    };
-
-    return NextResponse.json({ cookie, filters });
+    return NextResponse.json({ 
+      cookie: storage.roblox_cookie, 
+      filters: storage.bot_filters 
+    });
   } catch (error) {
     return NextResponse.json({ cookie: '', filters: null }, { status: 500 });
   }
@@ -23,8 +29,8 @@ export async function POST(request: Request) {
   try {
     const { cookie, filters } = await request.json();
 
-    await kv.set('roblox_cookie', cookie);
-    await kv.set('bot_filters', filters);
+    storage.roblox_cookie = cookie;
+    storage.bot_filters = filters;
 
     return NextResponse.json({ success: true });
   } catch (error) {
