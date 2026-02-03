@@ -1,184 +1,36 @@
 import { NextResponse } from 'next/server';
-import { kv } from '@vercel/kv';
 
-interface FriendRequest {
-  id: number;
-  userId: number;
-  username: string;
-  displayName: string;
-}
+// Simple in-memory storage
+let stats = {
+  total_declined: 0,
+  last_run: 'Never',
+  pending_requests: 0
+};
 
-interface UserProfile {
-  id: number;
-  name: string;
-  displayName: string;
-  description: string;
-  created: string;
-  isBanned: boolean;
-}
-
-interface FriendsData {
-  data: Array<{ id: number }>;
-}
-
-async function getRobloxUserId(cookie: string): Promise<number> {
-  const response = await fetch('https://users.roblox.com/v1/users/authenticated', {
-    headers: {
-      'Cookie': `.ROBLOSECURITY=${cookie}`
-    }
-  });
-  
-  if (!response.ok) {
-    throw new Error('Invalid Roblox cookie');
+export async function GET() {
+  try {
+    return NextResponse.json({
+      totalDeclined: stats.total_declined,
+      lastRun: stats.last_run,
+      pendingRequests: stats.pending_requests
+    });
+  } catch (error) {
+    return NextResponse.json({
+      totalDeclined: 0,
+      lastRun: 'Never',
+      pendingRequests: 0
+    });
   }
-  
-  const data = await response.json();
-  return data.id;
-}
-
-async function getFriendRequests(cookie: string): Promise<FriendRequest[]> {
-  const response = await fetch('https://friends.roblox.com/v1/my/friends/requests?sortOrder=Desc&limit=100', {
-    headers: {
-      'Cookie': `.ROBLOSECURITY=${cookie}`
-    }
-  });
-
-  if (!response.ok) {
-    throw new Error('Failed to fetch friend requests');
-  }
-
-  const data = await response.json();
-  return data.data || [];
-}
-
-async function getUserProfile(userId: number, cookie: string): Promise<UserProfile> {
-  const response = await fetch(`https://users.roblox.com/v1/users/${userId}`, {
-    headers: {
-      'Cookie': `.ROBLOSECURITY=${cookie}`
-    }
-  });
-
-  if (!response.ok) {
-    throw new Error('Failed to fetch user profile');
-  }
-
-  return await response.json();
-}
-
-async function getUserFriendsCount(userId: number, cookie: string): Promise<number> {
-  const response = await fetch(`https://friends.roblox.com/v1/users/${userId}/friends/count`, {
-    headers: {
-      'Cookie': `.ROBLOSECURITY=${cookie}`
-    }
-  });
-
-  if (!response.ok) {
-    return 0;
-  }
-
-  const data = await response.json();
-  return data.count || 0;
-}
-
-async function declineFriendRequest(userId: number, cookie: string): Promise<boolean> {
-  const myUserId = await getRobloxUserId(cookie);
-  
-  const response = await fetch(`https://friends.roblox.com/v1/users/${myUserId}/friends/requests/${userId}/decline`, {
-    method: 'POST',
-    headers: {
-      'Cookie': `.ROBLOSECURITY=${cookie}`,
-      'Content-Type': 'application/json'
-    }
-  });
-
-  return response.ok;
-}
-
-function isBot(profile: UserProfile, friendsCount: number, filters: any): boolean {
-  // Check account age
-  const accountAge = Math.floor((Date.now() - new Date(profile.created).getTime()) / (1000 * 60 * 60 * 24));
-  if (accountAge < filters.minAccountAge) {
-    return true;
-  }
-
-  // Check friends count
-  if (friendsCount < filters.minFriends || friendsCount > filters.maxFriends) {
-    return true;
-  }
-
-  // Check if banned
-  if (profile.isBanned) {
-    return true;
-  }
-
-  // Check description for suspicious patterns
-  if (filters.checkDescription && profile.description) {
-    const description = profile.description.toLowerCase();
-    for (const pattern of filters.suspiciousPatterns) {
-      if (description.includes(pattern.toLowerCase())) {
-        return true;
-      }
-    }
-  }
-
-  return false;
 }
 
 export async function POST(request: Request) {
   try {
-    const cookie = await kv.get('roblox_cookie') as string;
-    const filters = await kv.get('bot_filters') as any;
-
-    if (!cookie) {
-      return NextResponse.json({ error: 'No Roblox cookie configured' }, { status: 400 });
-    }
-
-    if (!filters || !filters.enabled) {
-      return NextResponse.json({ error: 'Auto-decline is not enabled' }, { status: 400 });
-    }
-
-    // Get all pending friend requests
-    const friendRequests = await getFriendRequests(cookie);
-    await kv.set('pending_requests', friendRequests.length);
-
-    let declined = 0;
-
-    // Process each friend request
-    for (const request of friendRequests) {
-      try {
-        // Get user profile
-        const profile = await getUserProfile(request.userId, cookie);
-        const friendsCount = await getUserFriendsCount(request.userId, cookie);
-
-        // Check if user is a bot
-        if (isBot(profile, friendsCount, filters)) {
-          // Decline the friend request
-          const success = await declineFriendRequest(request.userId, cookie);
-          if (success) {
-            declined++;
-          }
-        }
-
-        // Add small delay to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 500));
-      } catch (error) {
-        console.error(`Error processing user ${request.userId}:`, error);
-      }
-    }
-
-    // Update stats
-    const totalDeclined = (await kv.get('total_declined') as number || 0) + declined;
-    await kv.set('total_declined', totalDeclined);
-    await kv.set('last_run', new Date().toLocaleString());
-    await kv.set('pending_requests', friendRequests.length - declined);
-
-    return NextResponse.json({
-      success: true,
-      declined,
-      checked: friendRequests.length
-    });
-  } catch (error: any) {
-    console.error('Error in decline API:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    const data = await request.json();
+    if (data.total_declined !== undefined) stats.total_declined = data.total_declined;
+    if (data.last_run !== undefined) stats.last_run = data.last_run;
+    if (data.pending_requests !== undefined) stats.pending_requests = data.pending_requests;
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    return NextResponse.json({ error: 'Failed to update stats' }, { status: 500 });
   }
 }
