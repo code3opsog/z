@@ -51,7 +51,7 @@ export async function GET() {
     
     const cookie = await getSetting('roblox_cookie') || '';
     const filters = await getSetting('bot_filters') || {
-      minAccountAge: 30,
+      minAccountAge: 60,
       maxFriends: 10,
       minFriends: 0,
       checkDescription: true,
