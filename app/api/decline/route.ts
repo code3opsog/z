@@ -136,14 +136,9 @@ async function declineFriendRequest(userId: number, cookie: string): Promise<boo
 }
 
 function isBot(profile: UserProfile, friendsCount: number, filters: any): boolean {
-  // Check account age
+  // Check account age - decline if less than 60 days old (2 months)
   const accountAge = Math.floor((Date.now() - new Date(profile.created).getTime()) / (1000 * 60 * 60 * 24));
-  if (accountAge < filters.minAccountAge) {
-    return true;
-  }
-
-  // Check friends count
-  if (friendsCount < filters.minFriends || friendsCount > filters.maxFriends) {
+  if (accountAge < 60) {
     return true;
   }
 
